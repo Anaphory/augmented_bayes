@@ -31,6 +31,8 @@ class Node:
             self.labels = range(self.probabilities.shape[self.c])
         else:
             assert(len(labels)==self.probabilities.shape[self.c])
+            self.labels=labels
+            
         self.lambdas = {}
         self.pis = [parent.belief() for parent in self.parents]
 
@@ -67,9 +69,9 @@ class Node:
             p = numpy.tensordot(pi, p, 1)
 
         for child in self.lambdas.keys():
-            try:
+            if child != "evidence":
                 me = child.parents.index(self)
-            except ValueError:
+            else:
                 continue
             lmbda = 1
             for other_child, value in self.lambdas.items():
@@ -77,4 +79,37 @@ class Node:
                     lmbda = value * lmbda
             
             child.pis[me] = normalize(lmbda*p)
+    
+    def __repr__(self):
+        return "<Node %s>" %(self.name)
         
+
+class TreeAugmentedClassifier:
+    def __init__(self, classes, a_priori_probabilities):
+        self.classes = Node(a_priori_probabilities, [], "class", classes)
+        self.nodes = []
+        
+    def add_node(self, p, name, labels=None, parent=None):
+        #p: conditional_probabilities_by_class
+        p = numpy.asarray(p)
+        if parent:
+            cl, pa, pr = p.shape
+            assert(cl == len(self.classes.labels))
+            assert(pa == len(parent.labels))
+            new = Node(p, [self.classes, parent], name, labels)
+        else:
+            cl, pr = p.shape
+            assert(cl == len(self.classes.labels))
+            new = Node(p, [self.classes], name, labels)
+        self.nodes.append(new)
+        return new
+    
+    def inference(self):
+        self.classes.down()
+        for node in self.nodes:
+            node.down()
+        for node in reversed(self.nodes):
+            node.up()
+        self.classes.down()
+        return self.classes.belief()
+
