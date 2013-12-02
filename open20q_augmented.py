@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.3
 # -*- encoding: utf-8 -*-
 
 # According to the ideas of http://lists.canonical.org/pipermail/kragen-tol/2010-March/000912.html
@@ -316,8 +316,8 @@ class TreeAugmentedNaiveBayes (BBN, NaiveBayes):
         return self.evidence.get(node)
     def del_evidence(self):
         self.evidence = {}
-    def add_class(self, name, epsilon=1e-2): ...
-    def add_feature(self, name, values=["Yes","No"]): ...
+    def add_class(self, name, epsilon=1e-2): raise NotImplementedError
+    def add_feature(self, name, values=["Yes","No"]): raise NotImplementedError
     def update_from_evidence(self, name, epsilon=1e-2): raise NotImplementedError
 
 knowledge = NaiveBayes(
@@ -387,6 +387,12 @@ def cpd_matrix_to_factors(
             for i, c in enumerate(self_values["class"])])
                        .set_index(["class",feature]),
                               feature))
+    for cl in self_values["class"]:
+        factors.append(Factor(pandas.DataFrame([
+            {"class": c, cl: boolean, "p": float((c==cl)==boolean)}
+             for c in self_values["class"]
+             for boolean in [True, False]]).set_index(["class",cl]), cl))
+
     return factors
 
 knowledge = TreeAugmentedNaiveBayes(map(BBNNode, cpd_matrix_to_factors([[1, 1, 1, 1, 1, 0, 0, 0, 0, 1],
@@ -426,15 +432,12 @@ class Interface:
         print(", ".join("{:s}: {:d}".format(str(answer), i)
                         for i, answer in enumerate(sorted(answers))))
         x = input("> ")
-        try:
-            x = int(x)
-            x = sorted(answers)[x]
-        except ValueError:
-            pass
-        print(x)
+        x = int(x)
+        x = sorted(answers)[x]
+        print(x, type(x) if type(x)!=str else "")
         return x
     def pose_final_question(self, item):
-        return self.pose_question("Is it {:s}?".format(item), ["No", "Yes"])
+        return self.pose_question("Is it {:s}?".format(item), [False, True])
     def pose_alternative(self):
         return input("What then? ")
     def win(self):
@@ -463,7 +466,6 @@ def decide_question(knowledge, epsilon=None, force_final=False):
     for question in questions:
         entropies_after_answer[question] = 0
         p_answers = knowledge.belief(question)
-        print(p_answers)
         for answer, p in zip(knowledge.values[question],
                              p_answers):
             if p > 0:
@@ -473,7 +475,6 @@ def decide_question(knowledge, epsilon=None, force_final=False):
         del knowledge.evidence[question]
         if not numpy.isfinite(entropies_after_answer[question]):
             entropies_after_answer[question] = numpy.inf
-    print(entropies_after_answer)
     return min(
         entropies_after_answer,
         key = entropies_after_answer.get)
@@ -481,32 +482,21 @@ def decide_question(knowledge, epsilon=None, force_final=False):
 def run(questions, knowledge, interface):
     knowledge.del_evidence()
     for i in range(questions):
-        print(i)
-        print(knowledge.belief("class"))
         if i>=questions-1:
             question = decide_question(knowledge, force_final=True)
         else:
             question = decide_question(knowledge)
             
-        print(question)
-        try:
+        if question in knowledge.values["class"]:
+            answer = interface.pose_final_question(question)
+        else:
             answers = knowledge.values[question]
             answer = interface.pose_question(question, answers)
-            knowledge.set_evidence(question, answer)
-        except KeyError:
-            # Values returned None, because `question` is not a
-            # feature, but a class.
+        knowledge.set_evidence(question, answer)
+        if question in knowledge.values["class"] and answer:
             item = question
-            answer = interface.pose_final_question(item)
-            if answer:
-                interface.win()
-                break
-            else:
-                x = knowledge.get_evidence("class")
-                if x is None:
-                    x = numpy.ones_like(knowledge.belief("class"))
-                x[knowledge.values["class"].index(item)] = 0
-                knowledge.set_evidence("class", x)
+            interface.win()
+            break
     else:
         item = interface.pose_alternative()
 
